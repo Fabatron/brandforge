@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BrandForge AI — Your Brand, Understood First.</title>
+    <meta name="description" content="BrandForge AI is an AI Branding Consultant that thinks like a strategist before it draws a single pixel. Get a complete brand strategy — not just a logo." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <script>
+      // Prevent flash of wrong theme
+      (function() {
+        const stored = localStorage.getItem('brandforge-theme');
+        if (stored === 'light') {
+          document.documentElement.classList.remove('dark');
+        } else if (!stored) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/app/main.tsx"></script>
+  </body>
+</html>
