@@ -278,7 +278,29 @@ CRITICAL RULES:
 - Be original. Be specific. Be memorable. Be provocative when the brand calls for it.
 - Output must feel like it came from a $50,000 branding engagement, not a template.
 - Think like a strategist first. Visuals come from strategy, not the other way around.
-- Write with authority and sophistication. Use precise language. Avoid filler.`;
+- Write with authority and sophistication. Use precise language. Avoid filler.
+
+FORBIDDEN WORDS & COLORS:
+- The client has provided a list of "anti-keywords" — words that must NEVER appear in your output. Treat these as absolute prohibitions, not suggestions. If the word appears in the client's own company description or industry label, find alternative vocabulary.
+- The client has also listed "colors to avoid." Never recommend or praise these colors in the creative direction — even if they appear in the client's preferred palette. Reinterpret those hues through the brand strategy lens (e.g., if a dark navy is listed as preferred but "blue" is to be avoided, describe it as "deep midnight" or "near-black with indigo undertones" — never "blue").
+
+DNA SCORE RULES:
+- Use the FULL 1–10 range. A score of 10 means world-class, iconic, nearly impossible to improve. Reserve 9–10 for truly exceptional cases.
+- Most early-stage brands should have at least one score of 5–6 and at least one score of 8–9. If every score is 7–9, you are not thinking critically.
+- The Overall Score must be the mathematical average rounded to one decimal, not a separate subjective rating.
+
+ARCHETYPE RULES:
+- Do NOT default to Sage for every business. Sage is appropriate for knowledge-driven, truth-seeking brands — not for brands whose primary value is emotional, aesthetic, or experiential.
+- Before selecting the primary archetype, identify at least 2 archetypes it is NOT and explain to yourself why. The user prompt will ask for this.
+- The archetype must connect to specific details from the client's inputs, not generic industry associations.
+
+BANNED LAZY WORDS — Never use these in any section:
+- "game-changer," "revolutionize," "revolutionary," "disruptive"
+- "seamless," "seamlessly"
+- "cutting-edge," "best-in-class," "world-class" (except in direct quotes)
+- "symphony" (unless literally about music), "sanctuary," "haven," "beacon"
+- "elevate," "unlock," "supercharge," "turbocharge," "level up"
+- "next-level," "best-of-breed," "industry-leading"`;
 }
 
 function buildUserPrompt(data: WizardData): string {
@@ -341,6 +363,26 @@ function buildUserPrompt(data: WizardData): string {
 # YOUR TASK
 
 Produce a complete, premium brand strategy for ${companyName}. Write as if this is a $50,000 brand strategy engagement delivered by a senior strategist. Each section must be thorough (2-4 paragraphs where appropriate), original, and grounded in the specific inputs above. Never use generic or clichéd branding advice.
+
+## ⛔ FORBIDDEN WORDS — DO NOT USE ANY OF THESE:
+${data.personality.never_keywords?.length ? data.personality.never_keywords.map(w => `- "${w}"`).join("\n") : "- (none specified)"}
+
+These are ABSOLUTE prohibitions. If any of these words appear in the company description or industry label, use alternative vocabulary. Check your entire output against this list before finalizing.
+
+## ⛔ COLORS TO AVOID:
+${data.visual.avoid_colors?.length ? data.visual.avoid_colors.map(c => `- ${c}`).join("\n") : "- (none specified)"}
+
+Do not recommend or praise these colors in the Creative Direction section. If a preferred color could be interpreted as one of these (e.g., a dark navy vs "blue"), describe it without using the forbidden color name.
+
+## DNA SCORE INSTRUCTIONS:
+- Use the full 1–10 range. Scores of 5–6 are normal and healthy for early-stage brands.
+- The Overall Score must equal the mathematical average of the 9 dimension scores (rounded to one decimal).
+- At least one dimension should score 5–6; at least one should score 8–9. Not all 7–9.
+
+## ARCHETYPE INSTRUCTIONS:
+- Before choosing the primary archetype, identify 2 archetypes this brand is definitely NOT and briefly note why.
+- Then choose the best-fit archetype and explain why it connects to the client's specific inputs.
+- Do NOT default to Sage. Only choose Sage if the brand's primary value is knowledge and truth (e.g., research, education, data analysis).
 
 Output EXACTLY in this format — use these section headers verbatim:
 
