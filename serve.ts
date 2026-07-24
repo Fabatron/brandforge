@@ -596,8 +596,9 @@ async function handleApi(req: Request): Promise<Response> {
     }
     d.run("INSERT INTO magic_tokens (email, token, expires_at) VALUES (?, ?, ?)", [email, token, expiresAt]);
 
-    // Build magic URL using the actual request host
-    const host = req.headers.get("host") || `localhost:${PORT}`;
+    // Build magic URL using the public hostname.
+    // Priority: X-Forwarded-Host (proxy) → Host (direct) → localhost (fallback)
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || `localhost:${PORT}`;
     const protocol = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
     const magicUrl = `${protocol}://${host}/api/auth/verify?token=${token}`;
 
