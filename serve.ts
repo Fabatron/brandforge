@@ -3,6 +3,9 @@
 // Run `bun run build` before starting. Restart with `bun run publish`.
 import { Database } from "bun:sqlite";
 import { randomBytes, createHash } from "node:crypto";
+import { Resend } from "resend";
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
@@ -97,6 +100,111 @@ function getSession(token: string) {
     return null;
   }
   return s;
+}
+
+// --- Rate limiter ---
+const rateLimitMap = new Map<string, number[]>();
+
+function checkRateLimit(email: string): boolean {
+  const now = Date.now();
+  const windowMs = 5 * 60 * 1000; // 5 minutes
+  const maxRequests = 3;
+
+  // Purge expired entries
+  const timestamps = rateLimitMap.get(email)?.filter((t) => now - t < windowMs) ?? [];
+
+  if (timestamps.length >= maxRequests) return false;
+
+  timestamps.push(now);
+  rateLimitMap.set(email, timestamps);
+  return true;
+}
+
+// Periodic cleanup of stale rate limit entries (every 10 minutes)
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [email, timestamps] of rateLimitMap) {
+    const fresh = timestamps.filter((t) => t > cutoff);
+    if (fresh.length === 0) rateLimitMap.delete(email);
+    else rateLimitMap.set(email, fresh);
+  }
+}, 10 * 60 * 1000);
+
+// --- Email builder ---
+function buildMagicLinkEmail(magicUrl: string, email: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in to BrandForge AI</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+          <!-- Logo / Wordmark -->
+          <tr>
+            <td align="center" style="padding-bottom:32px;">
+              <span style="font-size:28px;font-weight:700;color:#e2e8f0;letter-spacing:-0.5px;">BrandForge <span style="color:#6366f1;">AI</span></span>
+            </td>
+          </tr>
+          <!-- Card -->
+          <tr>
+            <td style="background-color:rgba(30,41,59,0.7);border:1px solid rgba(99,102,241,0.15);border-radius:12px;padding:40px 32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="color:#e2e8f0;font-size:20px;font-weight:600;padding-bottom:16px;text-align:center;">
+                    Sign in to BrandForge AI
+                  </td>
+                </tr>
+                <tr>
+                  <td style="color:#94a3b8;font-size:15px;line-height:1.6;padding-bottom:32px;text-align:center;">
+                    Click the button below to sign in to your BrandForge AI account. This link expires in 15 minutes and can only be used once.
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding-bottom:32px;">
+                    <a href="${magicUrl}" style="display:inline-block;background-color:#6366f1;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 36px;border-radius:8px;white-space:nowrap;">Sign in to BrandForge AI</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="color:#64748b;font-size:12px;line-height:1.6;padding-bottom:8px;text-align:center;">
+                    If the button doesn't work, copy and paste this link into your browser:
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-bottom:8px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:rgba(15,23,42,0.6);border:1px solid rgba(99,102,241,0.08);border-radius:6px;">
+                      <tr>
+                        <td style="padding:12px 16px;color:#6366f1;font-size:12px;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;word-break:break-all;">
+                          ${magicUrl}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding-top:24px;text-align:center;">
+              <p style="color:#475569;font-size:12px;margin:0 0 8px 0;">
+                If you didn't request this email, you can safely ignore it.
+              </p>
+              <p style="color:#334155;font-size:11px;margin:0;">
+                &copy; 2026 BrandForge AI
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 // --- Cookie helpers ---
@@ -510,6 +618,11 @@ async function handleApi(req: Request): Promise<Response> {
       return json({ error: "Valid email required" }, 400);
     }
 
+    // Rate limit: max 3 per 5 minutes per email
+    if (!checkRateLimit(email)) {
+      return json({ error: "Too many requests. Please wait a few minutes." }, 429);
+    }
+
     const token = randomBytes(24).toString("hex");
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
@@ -525,11 +638,39 @@ async function handleApi(req: Request): Promise<Response> {
     }
     d.run("INSERT INTO magic_tokens (email, token, expires_at) VALUES (?, ?, ?)", [email, token, expiresAt]);
 
-    // In production, send email here. For MVP, log the magic link.
-    const magicUrl = `http://localhost:${PORT}/api/auth/verify?token=${token}`;
+    // Build magic URL using the actual request host
+    const host = req.headers.get("host") || `localhost:${PORT}`;
+    const protocol = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
+    const magicUrl = `${protocol}://${host}/api/auth/verify?token=${token}`;
+
+    // Always log for debugging
     console.log(`[BrandForge] Magic link for ${email}: ${magicUrl}`);
 
-    return json({ ok: true, message: "Check your email for a magic link." });
+    // Send real email via Resend
+    if (!resend) {
+      console.warn("[BrandForge] RESEND_API_KEY not set — email not sent. Magic link logged above.");
+      return json({ error: "Email service not configured" }, 500);
+    }
+
+    try {
+      const { data, error } = await resend.emails.send({
+        from: "BrandForge AI <onboarding@resend.dev>",
+        to: [email],
+        subject: "Sign in to BrandForge AI",
+        html: buildMagicLinkEmail(magicUrl, email),
+      });
+
+      if (error) {
+        console.error("[BrandForge] Resend error:", error);
+        return json({ error: "Failed to send email. Please try again." }, 500);
+      }
+
+      console.log(`[BrandForge] Email sent to ${email} — Resend ID: ${data?.id}`);
+      return json({ ok: true, message: "Check your email for a magic link." });
+    } catch (err) {
+      console.error("[BrandForge] Resend exception:", err);
+      return json({ error: "Failed to send email. Please try again." }, 500);
+    }
   }
 
   // GET /api/auth/verify?token=xxx
