@@ -4,6 +4,13 @@
 import { Database } from "bun:sqlite";
 import { randomBytes, createHash } from "node:crypto";
 import { Resend } from "resend";
+import {
+  validate,
+  buildContext,
+  buildSystemPrompt,
+  buildUserPrompt,
+  validateResponse,
+} from "./src/intelligence/index";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -220,6 +227,8 @@ function parseCookies(header: string | null): Record<string, string> {
 
 // --- OpenAI Strategy Generation ---
 
+// WizardData mirrors the raw JSON stored in project.data (snake_case from wizard).
+// It stays here because it's tightly coupled to the DB/API layer.
 interface WizardData {
   company: {
     name: string;
@@ -267,161 +276,6 @@ interface WizardData {
     existing_url: string;
     social_networks: string;
   };
-}
-
-function buildSystemPrompt(): string {
-  return `You are BrandForge AI, a world-class Brand Strategist with decades of experience at top branding agencies (Interbrand, Wolff Olins, Pentagram). You never produce generic or clichéd branding. You think deeply about what makes each business unique before you suggest anything.
-
-CRITICAL RULES:
-- NEVER use industry clichés (no coffee cups for coffee shops, no hexagons for tech, no scales for law firms, no dumbbells for fitness, no bar charts for finance, no crosses for healthcare, no leaves for eco brands, no swooshes for sports)
-- Every recommendation must be justified by the company's specific strategy, positioning, and personality
-- Be original. Be specific. Be memorable. Be provocative when the brand calls for it.
-- Output must feel like it came from a $50,000 branding engagement, not a template.
-- Think like a strategist first. Visuals come from strategy, not the other way around.
-- Write with authority and sophistication. Use precise language. Avoid filler.
-
-FORBIDDEN WORDS & COLORS:
-- The client has provided a list of "anti-keywords" — words that must NEVER appear in your output. Treat these as absolute prohibitions, not suggestions. If the word appears in the client's own company description or industry label, find alternative vocabulary.
-- The client has also listed "colors to avoid." Never recommend or praise these colors in the creative direction — even if they appear in the client's preferred palette. Reinterpret those hues through the brand strategy lens (e.g., if a dark navy is listed as preferred but "blue" is to be avoided, describe it as "deep midnight" or "near-black with indigo undertones" — never "blue").
-
-DNA SCORE RULES:
-- Use the FULL 1–10 range. A score of 10 means world-class, iconic, nearly impossible to improve. Reserve 9–10 for truly exceptional cases.
-- Most early-stage brands should have at least one score of 5–6 and at least one score of 8–9. If every score is 7–9, you are not thinking critically.
-- The Overall Score must be the mathematical average rounded to one decimal, not a separate subjective rating.
-
-ARCHETYPE RULES:
-- Do NOT default to Sage for every business. Sage is appropriate for knowledge-driven, truth-seeking brands — not for brands whose primary value is emotional, aesthetic, or experiential.
-- Before selecting the primary archetype, identify at least 2 archetypes it is NOT and explain to yourself why. The user prompt will ask for this.
-- The archetype must connect to specific details from the client's inputs, not generic industry associations.
-
-BANNED LAZY WORDS — Never use these in any section:
-- "game-changer," "revolutionize," "revolutionary," "disruptive"
-- "seamless," "seamlessly"
-- "cutting-edge," "best-in-class," "world-class" (except in direct quotes)
-- "symphony" (unless literally about music), "sanctuary," "haven," "beacon"
-- "elevate," "unlock," "supercharge," "turbocharge," "level up"
-- "next-level," "best-of-breed," "industry-leading"`;
-}
-
-function buildUserPrompt(data: WizardData): string {
-  const companyName = data.company.name || "This business";
-
-  return `You are conducting a complete brand strategy engagement for a client. Below is everything you need to know from their Brand Discovery process. Produce a comprehensive, original brand strategy with every section below.
-
----
-
-# CLIENT PROFILE
-
-## Company
-- Name: ${data.company.name || "Not provided"}
-- Description: ${data.company.description || "Not provided"}
-- Industry: ${data.company.industry || "Not provided"}
-- Products/Services: ${data.company.products_services || "Not provided"}
-- Country: ${data.company.country || "Not provided"}
-
-## Vision & Mission
-- Mission: ${data.vision.mission || "Not provided"}
-- Vision: ${data.vision.vision || "Not provided"}
-- Core Values: ${data.vision.core_values || "Not provided"}
-- Business Goals: ${data.vision.business_goals || "Not provided"}
-- Brand Goals: ${data.vision.brand_goals || "Not provided"}
-
-## Target Audience
-- Target Audience: ${data.audience.target_audience || "Not provided"}
-- Pain Points: ${data.audience.pain_points || "Not provided"}
-- Desires: ${data.audience.desires || "Not provided"}
-- Known Competitors: ${data.audience.competitors || "Not provided"}
-- USP: ${data.audience.usp || "Not provided"}
-- Competitive Advantages: ${data.audience.competitive_advantages || "Not provided"}
-
-## Brand Personality & Voice
-- Personality Traits: ${data.personality.brand_personality?.join(", ") || "Not specified"}
-- Tone of Voice: ${data.personality.tone_of_voice?.join(", ") || "Not specified"}
-- Keywords (what the brand IS): ${data.personality.keywords?.join(", ") || "Not specified"}
-- Anti-Keywords (what the brand is NOT): ${data.personality.never_keywords?.join(", ") || "Not specified"}
-
-## Inspirations
-- Admired Brands: ${data.inspirations.brands?.map(b => `${b.name}${b.admire.length ? ` (admired for: ${b.admire.join(", ")})` : ""}`).join("; ") || "None provided"}
-- Brands They're Confused With: ${data.inspirations.confused_with || "Not provided"}
-- Desired Emotions: ${data.inspirations.emotions?.join(", ") || "Not specified"}
-
-## Visual Direction
-- Preferred Colors: ${data.visual.preferred_colors?.join(", ") || "Not specified"}
-- Colors to Avoid: ${data.visual.avoid_colors?.join(", ") || "Not specified"}
-- Typography Direction: ${data.visual.typography?.join(", ") || "Not specified"}
-- Existing Assets: ${data.visual.existing_assets || "None"}
-- Logo References/Ideas: ${data.visual.logo_references || "None"}
-
-## Goals
-- Website Goals: ${data.goals.website_goals || "Not provided"}
-- Marketing Goals: ${data.goals.marketing_goals || "Not provided"}
-- Existing URL: ${data.goals.existing_url || "None"}
-- Social Networks: ${data.goals.social_networks || "None"}
-
----
-
-# YOUR TASK
-
-Produce a complete, premium brand strategy for ${companyName}. Write as if this is a $50,000 brand strategy engagement delivered by a senior strategist. Each section must be thorough (2-4 paragraphs where appropriate), original, and grounded in the specific inputs above. Never use generic or clichéd branding advice.
-
-## ⛔ FORBIDDEN WORDS — DO NOT USE ANY OF THESE:
-${data.personality.never_keywords?.length ? data.personality.never_keywords.map(w => `- "${w}"`).join("\n") : "- (none specified)"}
-
-These are ABSOLUTE prohibitions. If any of these words appear in the company description or industry label, use alternative vocabulary. Check your entire output against this list before finalizing.
-
-## ⛔ COLORS TO AVOID:
-${data.visual.avoid_colors?.length ? data.visual.avoid_colors.map(c => `- ${c}`).join("\n") : "- (none specified)"}
-
-Do not recommend or praise these colors in the Creative Direction section. If a preferred color could be interpreted as one of these (e.g., a dark navy vs "blue"), describe it without using the forbidden color name.
-
-## DNA SCORE INSTRUCTIONS:
-- Use the full 1–10 range. Scores of 5–6 are normal and healthy for early-stage brands.
-- The Overall Score must equal the mathematical average of the 9 dimension scores (rounded to one decimal).
-- At least one dimension should score 5–6; at least one should score 8–9. Not all 7–9.
-
-## ARCHETYPE INSTRUCTIONS:
-- Before choosing the primary archetype, identify 2 archetypes this brand is definitely NOT and briefly note why.
-- Then choose the best-fit archetype and explain why it connects to the client's specific inputs.
-- Do NOT default to Sage. Only choose Sage if the brand's primary value is knowledge and truth (e.g., research, education, data analysis).
-
-Output EXACTLY in this format — use these section headers verbatim:
-
-## EXECUTIVE SUMMARY
-(2-3 powerful paragraphs capturing the brand's essence, market opportunity, and strategic direction. Make it compelling and specific.)
-
-## BRAND POSITIONING
-(Where this brand sits in the competitive landscape. What space it owns. Include an "only [brand] that [differentiator] for [audience]" positioning statement. 2-3 paragraphs.)
-
-## BRAND DNA SCORE
-Rate each dimension 1-10 with a one-line explanation:
-- Positioning: [score]/10 — [explanation]
-- Differentiation: [score]/10 — [explanation]
-- Consistency: [score]/10 — [explanation]
-- Memorability: [score]/10 — [explanation]
-- Emotional Appeal: [score]/10 — [explanation]
-- Trust: [score]/10 — [explanation]
-- Premium Perception: [score]/10 — [explanation]
-- Innovation: [score]/10 — [explanation]
-- Market Fit: [score]/10 — [explanation]
-- Overall Score: [score]/10 — [summary]
-
-## BRAND ARCHETYPE
-(Identify the primary archetype — Sage, Creator, Hero, Outlaw, Explorer, Magician, Ruler, Lover, Caregiver, Jester, Innocent, or Regular Guy/Girl. Explain WHY this archetype fits. Note any secondary archetype. Explain how this archetype should express itself in the brand's behavior, communication, and presence. 2-3 paragraphs.)
-
-## BRAND PERSONALITY & VOICE
-(Define the brand's character. How it speaks, how it behaves, what it never does. Include specific tone of voice guidelines with concrete examples — show a "do this, not that" example. 2-3 paragraphs.)
-
-## MESSAGING FRAMEWORK
-(Core brand message. 3-5 tagline options. Key messages for different audience segments. A concise elevator pitch. 2-4 paragraphs.)
-
-## CUSTOMER PERSONAS
-(2-3 detailed personas based on the target audience data. For each: Name, Role/Identity, Demographics summary, Goals, Frustrations, and how this brand fits their life. Be specific and avoid stereotypes. 3-5 paragraphs.)
-
-## COMPETITIVE ANALYSIS
-(For each named competitor, explain how ${companyName} differentiates. What the competitor does, what ${companyName} does differently, and the strategic advantage. If no competitors were named, analyze the competitive category generally. 2-4 paragraphs.)
-
-## CREATIVE DIRECTION
-(Visual concept summary. Color psychology rationale tied to the brand strategy. Typography direction. Shapes/symbolism and mood. Overall aesthetic. Use this exact phrase at least once: "The visual identity is inspired by..." Do NOT design a specific logo — this is the creative strategy that would inform design. 3-4 paragraphs.)`;
 }
 
 function parseStrategyResponse(text: string): Record<string, any> {
@@ -523,6 +377,46 @@ async function generateStrategy(projectId: number, userId: number): Promise<void
     return;
   }
 
+  // ---- Brand Intelligence Layer: Pre-processing ----
+
+  // Step 1: Validate input
+  const validationResult = validate(wizardData as any);
+  if (validationResult.issues.length > 0) {
+    const errorCount = validationResult.issues.filter((i) => i.severity === "error").length;
+    const warnCount = validationResult.issues.filter((i) => i.severity === "warning").length;
+    const infoCount = validationResult.issues.filter((i) => i.severity === "info").length;
+    console.log(`[BrandForge] Input validation: ${errorCount} errors, ${warnCount} warnings, ${infoCount} info`);
+    for (const issue of validationResult.issues) {
+      console.log(`  [${issue.severity.toUpperCase()}] ${issue.field}: ${issue.message}`);
+    }
+  }
+
+  if (!validationResult.valid) {
+    console.error(`[BrandForge] Input validation failed for project ${projectId} — blocking generation`);
+    d.run("UPDATE projects SET status = 'error', data = ?, updated_at = datetime('now') WHERE id = ?", [
+      JSON.stringify({
+        ...JSON.parse(project.data),
+        strategy: {
+          error: "VALIDATION_FAILED",
+          message: "Required fields missing. Please complete the Brand Discovery wizard.",
+          validation: validationResult,
+        },
+      }),
+      projectId
+    ]);
+    return;
+  }
+
+  // Step 2: Build enriched context (normalize, strip forbidden words, derive insights)
+  const enrichedContext = buildContext(wizardData as any);
+  console.log(`[BrandForge] Context built for project ${projectId}`);
+  if (enrichedContext.derived.strippedWords.length > 0) {
+    console.log(`[BrandForge] Stripped forbidden words from input: ${enrichedContext.derived.strippedWords.join(", ")}`);
+  }
+  if (enrichedContext.derived.missingCriticalFields.length > 0) {
+    console.log(`[BrandForge] Missing critical fields: ${enrichedContext.derived.missingCriticalFields.join(", ")}`);
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.error("[BrandForge] OPENAI_API_KEY not set — skipping generation");
@@ -536,8 +430,9 @@ async function generateStrategy(projectId: number, userId: number): Promise<void
     return;
   }
 
+  // Step 3: Build prompts from enriched context
   const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt(wizardData);
+  const userPrompt = buildUserPrompt(enrichedContext);
 
   // Try up to 2 times
   let responseText = "";
@@ -620,6 +515,23 @@ async function generateStrategy(projectId: number, userId: number): Promise<void
     }
   }
 
+  // ---- Brand Intelligence Layer: Post-processing ----
+
+  // Step 4: Validate response
+  const responseValidation = validateResponse(responseText, enrichedContext);
+  if (responseValidation.violations.length > 0) {
+    console.warn(`[BrandForge] ⛔ Response validation found ${responseValidation.violations.length} violation(s):`);
+    for (const v of responseValidation.violations) {
+      console.warn(`  [VIOLATION] ${v.field}: ${v.message}`);
+    }
+  }
+  if (responseValidation.warnings.length > 0) {
+    console.warn(`[BrandForge] ⚠ Response validation found ${responseValidation.warnings.length} warning(s):`);
+    for (const w of responseValidation.warnings) {
+      console.warn(`  [WARNING] ${w.field}: ${w.message}`);
+    }
+  }
+
   // Parse and save
   const strategy = parseStrategyResponse(responseText);
   const existingData = JSON.parse(project.data);
@@ -630,6 +542,10 @@ async function generateStrategy(projectId: number, userId: number): Promise<void
       ...strategy,
       generatedAt: new Date().toISOString(),
       rawResponse: responseText,
+      validation: {
+        input: validationResult,
+        response: responseValidation,
+      },
     },
   };
 
