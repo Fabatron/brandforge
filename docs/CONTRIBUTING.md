@@ -48,6 +48,17 @@ chore: update dependencies
 4. If it needs shared types, add them to `src/types/`
 5. Register the route in `src/app/routes.tsx`
 
+## Production Stable Modules
+
+Some modules are frozen — see [PRODUCTION-STABLE.md](./PRODUCTION-STABLE.md) for the full list and rules.
+
+Before modifying any file in a frozen module:
+1. Confirm the change is necessary (bug, security, or explicit requirement)
+2. Document why, what risks, and expected impact
+3. Get approval before proceeding
+
+**Rule of thumb:** if you're touching code in a stable module during a feature sprint, stop and ask.
+
 ## Before Submitting
 
 - [ ] `bun run build` succeeds
@@ -55,3 +66,4 @@ chore: update dependencies
 - [ ] All existing routes return 200
 - [ ] No TypeScript errors
 - [ ] No unused imports or variables
+- [ ] No Production Stable modules were modified unless explicitly approved
